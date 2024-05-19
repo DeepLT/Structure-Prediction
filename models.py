@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rigid import *
+from utils import get_rel_pos
 
 class IPA(nn.Module):
     # Invariant Point Attention
@@ -40,10 +41,9 @@ class RigidUpdate(nn.Module):
 
 
 class StructureUpdate(nn.Module):
-    '''
-    node_dim : amino acid 종류 20가지 차원
-    hidden_dim : embedding 차원
-    '''
+    # node_dim : amino acid 종류 20개
+    # embed_dim : embedding 차원
+
     def __init__(self, node_dim, embed_dim, dropout_ratio):
         super().__init__()
         self.IPA = IPA(node_dim, embed_dim)
@@ -81,6 +81,29 @@ class StructureUpdate(nn.Module):
 
 
 class StructureModule(nn.Module):
-    # def __init__(self):
+    def __init__(self, node_dim, embed_dim, rel_pos_dim, n_layers, dropout_ratio):
+        super().__init__()
+        self.node_dim = node_dim
+        self.embed_dim =embed_dim
+        self.rel_pos_dim = rel_pos_dim
+
+        self.node_embedding = nn.Embedding(node_dim, embed_dim) # node_embed
+        # self.edge_embedding = nn.Embedding(in_dim, out_dim) # edge_embed
+
+        # StructureUpdate(model) init
+        self.Layers = nn.ModuleList([StructureUpdate(node_dim, embed_dim, dropout_ratio)] for _ in n_layers)
+
+
     
-    # def forward(self):
+    def forward(self, node_features, sequence):
+        # node_features : (seq_len, nb_classes=20)
+        # sequence : string type
+
+        init_rigid = init_rigid(len(sequence), self.rel_pos_dim) # 초기화된 Rigid 생성
+        
+        # relative position calc.
+        rel_pos = get_rel_pos(sequence) # rel_pos : (seq_len, seq_len)
+        rel_pos_embedding = F.one_hot()
+        # node 간 상대 위치 계산, 클램핑
+        # relative position embedding
+        # node_feature embedding
