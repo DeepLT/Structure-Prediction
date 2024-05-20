@@ -87,8 +87,11 @@ class StructureModule(nn.Module):
         self.embed_dim =embed_dim
         self.rel_pos_dim = rel_pos_dim
 
-        self.node_embedding = nn.Embedding(node_dim, embed_dim) # node_embed
-        # self.edge_embedding = nn.Embedding(in_dim, out_dim) # edge_embed
+        self.node_embedding = nn.Linear(node_dim, embed_dim) # node_embedding
+
+        # edge_embedding
+        # rel_pos_embedding과 차원 맞춤 & rigid 속성과 concat 위해(차원 1 추가) embed_dim보다 차원 1개 적게 설정
+        self.edge_embedding = nn.Linear(2 * rel_pos_dim + 1, embed_dim-1) 
 
         # StructureUpdate(model) init
         self.Layers = nn.ModuleList([StructureUpdate(node_dim, embed_dim, dropout_ratio)] for _ in n_layers)
@@ -99,11 +102,28 @@ class StructureModule(nn.Module):
         # node_features : (seq_len, nb_classes=20)
         # sequence : string type
 
-        init_rigid = init_rigid(len(sequence), self.rel_pos_dim) # 초기화된 Rigid 생성
+        rigid = init_rigid(len(sequence), self.rel_pos_dim) # 초기화된 Rigid 생성
         
         # relative position calc.
-        rel_pos = get_rel_pos(sequence) # rel_pos : (seq_len, seq_len)
-        rel_pos_embedding = F.one_hot()
-        # node 간 상대 위치 계산, 클램핑
+        rel_pos = get_rel_pos(sequence) # rel_pos : (seq_len, seq_len),  값은 (0, 2 * rel_pos_dim) 의 범위 가짐
+
         # relative position embedding
+        # num_classes=2*rel_pos_dim-1 : rel_pos의 값이 0~2*rel_pos_dim 사이이므로
+        # rel_pos_embedding : (seq_len, seq_len, 2 * self.rel_pos_dim + 1)
+        rel_pos_embedding = F.one_hot(rel_pos, num_classes=2 * self.rel_pos_dim + 1).to(dtype=node_features.dtype)
+
+        rel_pos_embedding = self.edge_embedding(rel_pos_embedding) # rel_pos_embedding : (seq_len, seq_len, embed_dim - 1)
+
         # node_feature embedding
+        node_features = self.node_embedding(node_features) # node_features : (seq_len, embed_dim)
+
+        for layer in self.Layers:
+            edge_features = torch.cat(
+                [rigid.origin.unsqueeze(-1).dist(rigid.origin).unsqueeze(-1), rel_pos_embedding], dim=-1
+            )
+            # edge_features = get_edge_features(rigid, rel_pos_embedding)
+            node_features, rigid = layer(node_features, edge_features, rigid)
+
+        # refine code.
+
+        return node_features

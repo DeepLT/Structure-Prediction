@@ -25,4 +25,11 @@ def get_rel_pos(sequence, rel_pos_dim): # node의 상대 위치 반환
 
     # rel_pos_dim 의 두 배 만큼 clamp, 모든 값 양수 되도록 조정
     rel_pos = rel_pos.clamp(min=-rel_pos_dim, max=rel_pos_dim) + rel_pos_dim
-    return rel_pos # rel_pos : (seq_len, seq_len)
+    return rel_pos # rel_pos : (seq_len, seq_len), 값은 (0, 2*rel_pos_dim) 의 범위 가짐
+
+def get_edge_features(rigid, rel_pos_embedding):
+    # rigid.origin : rigid의 좌표
+    # rigid.origin.unsqueeze(-1) : (seq_len, 3)
+    # dist : 유클리드 거리 계산, 브로드캐스팅 발생 (seq_len, seq_len)
+    # (seq_len, seq_len, embed_dim)
+    return torch.cat([rigid.origin.unsqueeze(-1).dist(rigid.origin).unsqueeze(-1), rel_pos_embedding], dim=-1)
