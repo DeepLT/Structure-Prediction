@@ -1,17 +1,32 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import repeat
+from invariant_point_attention import InvariantPointAttention
 from rigid import *
 from utils import get_rel_pos
 
-class IPA(nn.Module):
-    # Invariant Point Attention
-    def __init__(self, node_dim, embed_dim):
-        self.node_dim = node_dim
-        self.embed_dim = embed_dim
+class IPALayer:
+    # Invariant Point Attention Module
+    def __init__(self, node_dim, edge_dim):
+        self.IPA = InvariantPointAttention(
+            dim = node_dim,              # node_dim
+            heads = 8,                   # number of attention heads
+            scalar_key_dim = 16,         # scalar query-key dimension
+            scalar_value_dim = 16,       # scalar value dimension
+            point_key_dim = 4,           # point query-key dimension
+            point_value_dim = 4,         # point value dimension
+            pairwise_repr_dim = edge_dim # edge_dim, pairwise representation dimension
+        )
 
-    def forward(node_features, edge_features, rigid):
-        return
+    def forward(self, node_features, edge_features, rigid, mask):
+        return self.IPA(
+            node_features,
+            edge_features,
+            rotations = rigid.rot,
+            translations = rigid.origin,
+            mask = mask
+        )
     
 class RigidUpdate(nn.Module):
     # node_feature 기반으로 rigid update
@@ -46,7 +61,7 @@ class StructureUpdate(nn.Module):
 
     def __init__(self, node_dim, embed_dim, dropout_ratio):
         super().__init__()
-        self.IPA = IPA(node_dim, embed_dim)
+        self.IPA = IPALayer(node_dim, embed_dim)
         self.norm1 = nn.Sequential(
             nn.Dropout(dropout_ratio),
             nn.LayerNorm(node_dim)
@@ -70,7 +85,7 @@ class StructureUpdate(nn.Module):
     
     def forward(self, node_features, edge_features, rigid, mask=None):
         # out : node_feature
-        out = self.IPA(node_features, edge_features, rigid)
+        out = self.IPA(node_features, edge_features, rigid, mask)
         out = self.norm1(out)
         out = self.residual(out)
         out = self.norm2(out)
@@ -84,7 +99,7 @@ class StructureModule(nn.Module):
     def __init__(self, node_dim, embed_dim, rel_pos_dim, n_layers, dropout_ratio):
         super().__init__()
         self.node_dim = node_dim
-        self.embed_dim =embed_dim
+        self.embed_dim = embed_dim
         self.rel_pos_dim = rel_pos_dim
 
         self.node_embedding = nn.Linear(node_dim, embed_dim) # node_embedding
@@ -121,9 +136,10 @@ class StructureModule(nn.Module):
             edge_features = torch.cat(
                 [rigid.origin.unsqueeze(-1).dist(rigid.origin).unsqueeze(-1), rel_pos_embedding], dim=-1
             )
+            # edge_features: (seq_len, seq_len, embed_dim)
             # edge_features = get_edge_features(rigid, rel_pos_embedding)
             node_features, rigid = layer(node_features, edge_features, rigid)
 
         # refine code.
 
-        return node_features
+        return node_features, rigid

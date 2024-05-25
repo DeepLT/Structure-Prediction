@@ -7,6 +7,10 @@ class Rigid:
         self.rot = rot
         self.shape = self.origin.shape
 
+    def to(self, device):
+        return Rigid(self.origin.to(device), self.rot.to(device))
+
+
 def init_rigid(seq_len):
     '''create rigid body structure
     각 아미노산의 3차원 좌표, rotation matrix 생성
