@@ -19,40 +19,41 @@ class IPALayer:
             pairwise_repr_dim = edge_dim # edge_dim, pairwise representation dimension
         )
 
-    def forward(self, node_features, edge_features, rigid, mask):
+    def forward(self, node_features, edge_features, rotations, translations, mask=None):
         return self.IPA(
             node_features,
             edge_features,
-            rotations = rigid.rot,
-            translations = rigid.origin,
+            rotations = rotations,
+            translations = translations,
             mask = mask
         )
     
-class RigidUpdate(nn.Module):
-    # node_feature 기반으로 rigid update
+class QuaternionUpdate(nn.Module):
     def __init__(self, node_dim):
         super().__init__()
+        self.to_correction = nn.Linear(node_dim, 7)  # 4 for quaternion, 3 for translation
 
-        # origin, rot 나타내는 6개 차원으로 linear
-        self.linear = nn.Linear(node_dim, 6)
+    def forward(self, node_features, update_mask=None):
+        # Predict quaternion and translation vector
+        q, t = self.to_correction(node_features).chunk(2, dim=-1)
 
-    def forward(self, node_features, mask):
-        # linear 수행 후 rot(quaternion), origin 으로 분리
-        rot, origin = self.linear(node_features).chunk(2, dim=-1)
+        if update_mask is not None:
+            q = update_mask[:, None] * q
+            t = update_mask[:, None] * t
 
-        # 업데이트 마스크 적용
-        if mask is not None:
-            rot = mask[:, None] * rot
-            t = mask[:, None] * t
+        # Normalize quaternion
+        norm = torch.norm(q, dim=-1, keepdim=True)
+        q = q / norm
 
-        # 정규화
-        norm = (1 + rot.pow(2).sum(-1, keepdim=True)).pow(1 / 2)
-        b, c, d = (rot / norm).chunk(3, dim=-1)
-        a = 1 / norm
-        a, b, c, d = a.squeeze(-1), b.squeeze(-1), c.squeeze(-1), d.squeeze(-1)
-        rot = F.quaternion_to_rotation_matrix(torch.cat([a, b, c, d], dim=-1))
+        # Convert quaternion to rotation matrix
+        a, b, c, d = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+        R = torch.stack([
+            a**2 + b**2 - c**2 - d**2, 2*b*c - 2*a*d, 2*b*d + 2*a*c,
+            2*b*c + 2*a*d, a**2 - b**2 + c**2 - d**2, 2*c*d - 2*a*b,
+            2*b*d - 2*a*c, 2*c*d + 2*a*b, a**2 - b**2 - c**2 + d**2
+        ], dim=-1).reshape(q.shape[0], q.shape[1], 3, 3)
 
-        return Rigid(origin, rot)
+        return R, t
 
 
 class StructureUpdate(nn.Module):
@@ -77,6 +78,7 @@ class StructureUpdate(nn.Module):
             nn.Dropout(dropout_ratio),
             nn.LayerNorm(node_dim)
         )
+        self.quaternion = QuaternionUpdate(node_dim)
 
         # residual 초기화
         # with torch.no_grad():
